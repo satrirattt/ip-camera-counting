@@ -1,0 +1,22 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Secret / environment configuration
+.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Camera images and videos
+images/
+videos/
+
+# VS Code local configuration
+.vscode/
