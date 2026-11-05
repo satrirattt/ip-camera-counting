@@ -1,9 +1,11 @@
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import altair as alt
 import pandas as pd
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 BASE_DIR = Path(__file__).resolve().parent
 CLEAN_CSV = BASE_DIR / "camera_counts_clean.csv"
@@ -176,10 +178,9 @@ def load_from_csv(path: Path, modified_time: float) -> pd.DataFrame:
     return normalize_data(df)
 
 
-@st.cache_data(show_spinner=False)
-def load_from_database(path: Path, modified_time: float) -> pd.DataFrame:
-    """อ่านข้อมูลจาก SQLite เป็นทางเลือกเมื่อยังไม่มีไฟล์ CSV ที่ทำความสะอาด"""
-    connection = sqlite3.connect(path)
+def load_from_database(path: Path) -> pd.DataFrame:
+    """อ่านข้อมูลสดจาก SQLite (ไม่ cache เพื่อให้เห็นข้อมูลใหม่ทันที)"""
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
     try:
         df = pd.read_sql_query("""
         SELECT
@@ -188,6 +189,7 @@ def load_from_database(path: Path, modified_time: float) -> pd.DataFrame:
             object_count,
             qr_text
         FROM camera_detection_logs
+        ORDER BY captured_at
         """, connection)
     finally:
         connection.close()
@@ -272,14 +274,25 @@ def build_camera_summary(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_data() -> tuple[pd.DataFrame | None, str]:
-    """เลือกแหล่งข้อมูลจากไฟล์ที่ทำความสะอาดก่อน แล้วจึง fallback ไปที่ SQLite"""
-    if CLEAN_CSV.exists():
-        df = load_from_csv(CLEAN_CSV, CLEAN_CSV.stat().st_mtime)
-        return df, CLEAN_CSV.name
+    """อ่าน SQLite แบบสดก่อน หากใช้ไม่ได้จึง fallback ไปที่ไฟล์ CSV"""
+    errors: list[str] = []
 
     if DATABASE_FILE.exists():
-        df = load_from_database(DATABASE_FILE, DATABASE_FILE.stat().st_mtime)
-        return df, DATABASE_FILE.name
+        try:
+            df = load_from_database(DATABASE_FILE)
+            return df, "SQLite (อัปเดตสด)"
+        except (sqlite3.Error, ValueError, OSError) as exc:
+            errors.append(f"SQLite: {exc}")
+
+    if CLEAN_CSV.exists():
+        try:
+            df = load_from_csv(CLEAN_CSV, CLEAN_CSV.stat().st_mtime)
+            return df, f"CSV: {CLEAN_CSV.name}"
+        except (ValueError, OSError) as exc:
+            errors.append(f"CSV: {exc}")
+
+    if errors:
+        raise ValueError(" | ".join(errors))
 
     return None, ""
 
@@ -494,6 +507,24 @@ def main() -> None:
     <div class="sidebar-sub">ปรับมุมมองของ dashboard</div>
     """, unsafe_allow_html=True)
 
+    auto_refresh = st.sidebar.toggle(
+        "อัปเดตอัตโนมัติ",
+        value=True,
+        help="ดึงข้อมูลล่าสุดจาก SQLite ตามช่วงเวลาที่กำหนด",
+    )
+    refresh_seconds = st.sidebar.selectbox(
+        "ความถี่ในการอัปเดต (วินาที)",
+        options=[5, 10, 30, 60],
+        index=1,
+        disabled=not auto_refresh,
+    )
+
+    if auto_refresh:
+        st_autorefresh(
+            interval=refresh_seconds * 1000,
+            key="dashboard_autorefresh",
+        )
+
     if st.sidebar.button("โหลดข้อมูลใหม่", width="stretch"):
         st.cache_data.clear()
         st.rerun()
@@ -538,6 +569,7 @@ def main() -> None:
 
     st.sidebar.divider()
     st.sidebar.caption(f"แหล่งข้อมูล: {source}")
+    st.sidebar.caption(f"อัปเดตล่าสุด: {datetime.now():%H:%M:%S}")
 
     filtered = df[df["camera_id"].isin(selected_cameras)].copy()
     filtered = filtered[

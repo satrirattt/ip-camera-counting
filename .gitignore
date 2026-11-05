@@ -8,6 +8,10 @@ __pycache__/
 
 # Secret / environment configuration
 .env
+.streamlit/secrets.toml
+
+# Application logs
+logs/
 
 # Database files
 *.db
