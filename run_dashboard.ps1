@@ -33,7 +33,7 @@ while ($true) {
         -WorkingDirectory $ProjectDir `
         -RedirectStandardOutput $stdoutLog `
         -RedirectStandardError $stderrLog `
-        -NoNewWindow `
+        -WindowStyle Hidden `
         -PassThru `
         -Wait
 
